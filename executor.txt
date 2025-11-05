@@ -1,0 +1,176 @@
+/* Mini browser UI JS
+   - tries to load URLs in iframe
+   - fallback: opens in new tab if iframe errors or blocked
+*/
+
+const viewport = document.getElementById('viewport');
+const address = document.getElementById('address');
+const form = document.getElementById('navForm');
+const backBtn = document.getElementById('back');
+const forwardBtn = document.getElementById('forward');
+const reloadBtn = document.getElementById('reload');
+const newTabBtn = document.getElementById('newtab');
+const overlay = document.getElementById('overlay');
+const overlayMsg = document.getElementById('overlay-msg');
+const openNewBtn = document.getElementById('open-new');
+const tabsDiv = document.getElementById('tabs');
+
+let historyStack = [];
+let historyPos = -1;
+let tabs = [];
+let activeTabId = null;
+let nextTabId = 1;
+
+// helper: is a valid URL (basic)
+function maybeURL(text){
+  try { new URL(text); return true; } catch { return false; }
+}
+
+// Normalize input to a usable URL (if not URL, use Qwant Lite search)
+function toNavigationURL(text){
+  text = (text||'').trim();
+  if (!text) return null;
+  if (maybeURL(text)) {
+    return text.startsWith('http') ? text : 'https://' + text;
+  }
+  // search via Qwant Lite (no third-party heavy engines)
+  return `https://lite.qwant.com/?q=${encodeURIComponent(text)}`;
+}
+
+function showOverlay(msg){
+  overlayMsg.textContent = msg;
+  overlay.classList.remove('hidden');
+}
+
+function hideOverlay(){
+  overlay.classList.add('hidden');
+}
+
+function openURL(url, addToHistory=true){
+  if (!url) return;
+  showOverlay('Loading…');
+  // set iframe src — many sites block this, we'll detect failure via timeout + onload/onerror
+  viewport.src = url;
+  // track history
+  if (addToHistory){
+    // truncate future
+    historyStack = historyStack.slice(0, historyPos+1);
+    historyStack.push(url);
+    historyPos = historyStack.length - 1;
+    updateNavButtons();
+  }
+  // fallback detection: if iframe doesn't load in 3s -> open in new tab
+  let loaded = false;
+  const timer = setTimeout(()=>{
+    if (!loaded){
+      hideOverlay();
+      // show message and button to open externally
+      showOverlay('This site blocked embedding. Open in a new tab?');
+    }
+  }, 2500);
+
+  viewport.onload = () => {
+    loaded = true;
+    clearTimeout(timer);
+    hideOverlay();
+    address.value = url;
+  };
+  viewport.onerror = () => {
+    loaded = false;
+    clearTimeout(timer);
+    hideOverlay();
+    showOverlay('Error loading in iframe. Open externally?');
+  };
+}
+
+function updateNavButtons(){
+  backBtn.disabled = historyPos <= 0;
+  forwardBtn.disabled = historyPos >= historyStack.length - 1;
+}
+
+backBtn.addEventListener('click', () => {
+  if (historyPos > 0) {
+    historyPos -= 1;
+    openURL(historyStack[historyPos], false);
+    updateNavButtons();
+  }
+});
+forwardBtn.addEventListener('click', () => {
+  if (historyPos < historyStack.length - 1) {
+    historyPos += 1;
+    openURL(historyStack[historyPos], false);
+    updateNavButtons();
+  }
+});
+reloadBtn.addEventListener('click', () => {
+  if (historyPos >= 0) openURL(historyStack[historyPos], false);
+});
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const v = address.value.trim();
+  const url = toNavigationURL(v);
+  if (url) openURL(url, true);
+});
+
+openNewBtn.addEventListener('click', () => {
+  // open the last attempted url in a new tab
+  const url = viewport.src || address.value;
+  if (url) window.open(url, '_blank');
+  hideOverlay();
+});
+
+newTabBtn.addEventListener('click', () => {
+  createTab('about:blank');
+});
+
+// basic tab UI (not full browser tabs; it creates a simple label)
+function createTab(startUrl){
+  const id = 'tab' + (nextTabId++);
+  const tab = { id, title: 'New Tab', url: startUrl };
+  tabs.push(tab);
+
+  const el = document.createElement('div');
+  el.className = 'tab';
+  el.id = id;
+  el.innerHTML = `<span class="title">${tab.title}</span><span class="close">✕</span>`;
+  el.querySelector('.close').addEventListener('click', (e)=>{
+    e.stopPropagation();
+    closeTab(id);
+  });
+  el.addEventListener('click', ()=>activateTab(id));
+  tabsDiv.appendChild(el);
+  activateTab(id);
+  if (startUrl && startUrl !== 'about:blank') openURL(startUrl, true);
+}
+
+function activateTab(id){
+  activeTabId = id;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id===id));
+  // Could swap different iframe state per-tab here; for now single view
+}
+
+function closeTab(id){
+  const idx = tabs.findIndex(t=>t.id===id);
+  if (idx===-1) return;
+  tabs.splice(idx,1);
+  const el = document.getElementById(id);
+  if (el) el.remove();
+  if (activeTabId===id){
+    if (tabs.length) activateTab(tabs[Math.max(0,idx-1)].id);
+    else { activeTabId = null; /* nothing */ }
+  }
+}
+
+// create one initial tab
+createTab('about:blank');
+
+// allow clicking aside links (if you integrate)
+document.querySelectorAll('a[data-link]').forEach(a=>{
+  a.addEventListener('click', e=>{
+    e.preventDefault();
+    const url = a.dataset.link;
+    address.value = url;
+    openURL(url, true);
+  });
+});

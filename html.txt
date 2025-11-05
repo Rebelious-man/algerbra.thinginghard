@@ -1,0 +1,18 @@
+<!-- example HTML snippet -->
+<div id="yt-placeholder"></div>
+
+<script>
+// load YouTube IFrame API
+const tag = document.createElement('script');
+tag.src = "https://www.youtube.com/iframe_api";
+document.head.appendChild(tag);
+
+function createYT(videoId) {
+  new YT.Player('yt-placeholder', {
+    height: '390',
+    width: '640',
+    videoId: videoId,
+    playerVars: { rel: 0, modestbranding: 1 }
+  });
+}
+</script>
